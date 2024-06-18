@@ -25,12 +25,10 @@ import (
 	"fmt"
 	"math"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	flatmappb "github.com/numaproj/numaflow-go/pkg/apis/proto/flatmap/v1"
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/util/wait"
 
@@ -242,16 +240,16 @@ func (isdf *InterStepDataForward) forwardAChunk(ctx context.Context) {
 	// TODO(stream): see if that can be optimised by not duplicating the data slice, and passing
 	// We send only the dataMessages to the UDF for processing, for the non data messages,
 	// we just need to ack?
-	var dataMessages = make([]*types.RequestFlatmap, 0, len(readMessages))
+	var dataMessages = make([]*isb.ReadMessage, 0, len(readMessages))
 	var ctrlMessageOffsets = make([]isb.Offset, 0) // for a high TPS pipeline, 0 is the most optimal value
 	// the readMessages itself store the offsets of the messages we read from ISB
 	var readOffsets = make([]isb.Offset, len(readMessages))
 	for idx, m := range readMessages {
 		readOffsets[idx] = m.ReadOffset
 		if m.Kind == isb.Data {
-			newRequest := isdf.createNewRequest(m)
+			isdf.createNewRequest(m)
 			//isdf.opts.logger.Info("MYDEBUG NEW REQUEST ", newRequest.Uid)
-			dataMessages = append(dataMessages, newRequest)
+			dataMessages = append(dataMessages, m)
 
 		} else {
 			ctrlMessageOffsets = append(ctrlMessageOffsets, m.ReadOffset)
@@ -282,7 +280,7 @@ func (isdf *InterStepDataForward) forwardAChunk(ctx context.Context) {
 	// This channel is closed when the UDF processing is ackDone, to indicate that no further processing is required.
 	// TODO(stream): should we keep this buffered so that on shutdown we can drain whatever is completed,
 	// either as ack/no ack, also to check the responsibility for close
-	udfRespCh := make(chan *flatmappb.MapResponse)
+	udfRespCh := make(chan *types.ReadWriteMessagePair)
 
 	// Send the input messages for processing
 	// The error channel returned is used to signal any errors that might have occurred during the UDF processing.
@@ -362,19 +360,17 @@ func (isdf *InterStepDataForward) forwardAChunk(ctx context.Context) {
 // ackRoutine is a worker routine used to ack messages to the prev buffer.
 // It keeps reading constantly on the ackMsgChan for any new messages, and then acks them
 // Once, there are no more messages left to read on the channel, the routine exits.
-func (isdf *InterStepDataForward) ackRoutine(ctx context.Context, ackMsgChan <-chan *types.RequestFlatmap, wg *sync.WaitGroup) {
+func (isdf *InterStepDataForward) ackRoutine(ctx context.Context, ackMsgChan <-chan *isb.ReadMessage, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for response := range ackMsgChan {
 		//isdf.opts.logger.Info("MYDEBUG: GOT TO ACK ", response.Uid)
-		if err := isdf.ackFromBufferSingle(ctx, response.Request.ReadOffset); err != nil {
+		if err := isdf.ackFromBufferSingle(ctx, response.ReadOffset); err != nil {
 			isdf.opts.logger.Error("MYDEBUG: ERROR IN ACK ", zap.Error(err))
 			// TODO(stream): we have retried in the ackFromBuffer, should we trigger drain here then?
-			isdf.requestTracker.RemoveRequest(response.Uid)
 			metrics.AckMessageError.With(map[string]string{metrics.LabelVertex: isdf.vertexName, metrics.LabelPipeline: isdf.pipelineName, metrics.LabelVertexType: string(dfv1.VertexTypeMapUDF), metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica)), metrics.LabelPartitionName: isdf.fromBufferPartition.GetName()}).Inc()
 			return
 		}
-		isdf.requestTracker.RemoveRequest(response.Uid)
-		//isdf.opts.logger.Info("MYDEBUG: DONE ACK ", response.Uid)
+		isdf.requestTracker.RemoveRequest(response.ReadOffset.String())
 	}
 }
 
@@ -384,7 +380,7 @@ func (isdf *InterStepDataForward) ackRoutine(ctx context.Context, ackMsgChan <-c
 // Once all the pool workers exit, we consider the acking jobs to be completed and then close the done to indicate
 // this.
 // TODO(stream): check if the ack path can be optimised as now we are writing one message per worker, instead of sending a batch for writing.
-func (isdf *InterStepDataForward) invokeAck(ctx context.Context, ackMsgChan <-chan *types.RequestFlatmap) (doneChan chan struct{}) {
+func (isdf *InterStepDataForward) invokeAck(ctx context.Context, ackMsgChan <-chan *isb.ReadMessage) (doneChan chan struct{}) {
 	doneChan = make(chan struct{})
 	go func() {
 		defer close(doneChan)
@@ -403,50 +399,29 @@ func (isdf *InterStepDataForward) invokeAck(ctx context.Context, ackMsgChan <-ch
 // next buffer according to the conditional logic.
 // Once, there are no more messages left to read on the channel, the routine exits.
 // If there is an error in the UDF processing the udfRespCh is closed, so the workers should exit
-func (isdf *InterStepDataForward) writeRoutine(ctx context.Context, udfRespCh <-chan *flatmappb.MapResponse, ackChan chan<- *types.RequestFlatmap, wg *sync.WaitGroup) {
+func (isdf *InterStepDataForward) writeRoutine(ctx context.Context, udfRespCh <-chan *types.ReadWriteMessagePair, ackChan chan<- *isb.ReadMessage, wg *sync.WaitGroup) {
 	addCount := 0
 	defer func(int) {
 		metrics.UDFWriteMessagesCount.With(map[string]string{metrics.LabelVertex: isdf.vertexName, metrics.LabelPipeline: isdf.pipelineName, metrics.LabelVertexType: string(dfv1.VertexTypeMapUDF), metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica)), metrics.LabelPartitionName: isdf.fromBufferPartition.GetName()}).Add(float64(addCount))
 		wg.Done()
 	}(addCount)
 	for response := range udfRespCh {
-		uid := response.Result.GetUuid()
-		trackedRequest, ok := isdf.requestTracker.GetRequest(uid)
-		// TODO(stream): check what should be path for !ok, which means that we got a UUID
-		// which has already been deleted from the tracker/ or never added in the first place
-		// can this even happen though if messages are ordered and we only have a single routine processing it?
-		if !ok {
-			isdf.opts.logger.Error("MYDEBUG: MESSAGE NOT IN TRACKER ", response.Result.GetTotal(), uid)
-		}
-		parsedResp, requestDone, total := isdf.parseMapResponse(response, trackedRequest)
-		// if the response has the AckIt field = true, that indicates the end of the processing for
-		// a given message. In this case send the parent request for Acking and continue
-		// if requestDone (EOR == true) and total == 0 it means there were no responses
-		// expected for this request, hence we can directly ackIt, no need to write
-		if requestDone && total == 0 {
-			ackChan <- trackedRequest
-			continue
-		}
-		// If AckIt is not set, it is a data response, hence forward it to the next buffer
-		var messageToStep = make(map[string][]isb.Message)
+		writeMessages := response.WriteMessages
+		// create space for writeMessages specific to each step as we could forward to all the steps too.
+		var messageToStep = make(map[string][][]isb.Message)
 		for toVertex := range isdf.toBuffers {
 			// over allocating to have a predictable pattern
-			messageToStep[toVertex] = make([]isb.Message, len(isdf.toBuffers[toVertex]))
+			messageToStep[toVertex] = make([][]isb.Message, len(isdf.toBuffers[toVertex]))
 		}
-		writeMessage := parsedResp
-		if err := isdf.forwardToBuffers(ctx, writeMessage, trackedRequest.Request, messageToStep); err != nil {
+		if err := isdf.forwardToBuffers(ctx, *writeMessages, response.ReadMessage, messageToStep); err != nil {
 			// As we have re-tried already to forward to the buffer, we should not be trying it again.
 			// TODO(stream): so we should just exit and send this for no-ack? or exit
 			isdf.opts.logger.Error("MYDEBUG: NEW ERROR IN WRITE", zap.Error(err))
 		}
-		addCount++
-		// Update the response counter for the given UUID (request)
-		idxNum := isdf.updateCounter(uid)
+		addCount += len(*writeMessages)
 		// If the counter has reached the total number of responses expected, we can safely
 		// send the parent request for Acking
-		if idxNum == int64(total) {
-			ackChan <- trackedRequest
-		}
+		ackChan <- response.ReadMessage
 	}
 }
 
@@ -464,10 +439,10 @@ func (isdf *InterStepDataForward) updateCounter(key string) int64 {
 // Once all the pool workers exit, we consider the writing jobs to be completed and then close the ackChan to indicate
 // this further.
 // TODO(stream): check if the write path can be optimised as now we are writing one message per worker, instead of sending a batch for writing.
-func (isdf *InterStepDataForward) invokeWriter(ctx context.Context, writeMessageCh <-chan *flatmappb.MapResponse) <-chan *types.RequestFlatmap {
+func (isdf *InterStepDataForward) invokeWriter(ctx context.Context, writeMessageCh <-chan *types.ReadWriteMessagePair) <-chan *isb.ReadMessage {
 	// ackChan is used to stream the ReadMessage which need to be Acked
 	// TODO(stream):  if we want to send something for noAck explicitly, might want to use types.AckMsgFlatmap
-	ackChan := make(chan *types.RequestFlatmap)
+	ackChan := make(chan *isb.ReadMessage)
 	go func() {
 		// close to indicate that no further messages left to ack
 		defer close(ackChan)
@@ -483,13 +458,33 @@ func (isdf *InterStepDataForward) invokeWriter(ctx context.Context, writeMessage
 	return ackChan
 }
 
-func (isdf *InterStepDataForward) forwardToBuffers(ctx context.Context, writeMessages *isb.WriteMessage, readMessage *isb.ReadMessage, messageToStep map[string][]isb.Message) error {
-	if writeMessages == nil {
+//func (isdf *InterStepDataForward) forwardToBuffers(ctx context.Context, writeMessages *isb.WriteMessage, readMessage *isb.ReadMessage, messageToStep map[string][]isb.Message) error {
+//	if writeMessages == nil {
+//		return nil
+//	}
+//	if err := isdf.whereToStep(writeMessages, messageToStep, readMessage); err != nil {
+//		isdf.opts.logger.Errorw("failed in whereToStep", zap.Error(err))
+//		return err
+//	}
+//	// forward the messages to the edge buffer (could be multiple edges)
+//	_, err := isdf.writeToBuffers(ctx, messageToStep)
+//	if err != nil {
+//		isdf.opts.logger.Errorw("failed to write to toBuffers", zap.Error(err))
+//		return err
+//	}
+//	return nil
+//}
+
+func (isdf *InterStepDataForward) forwardToBuffers(ctx context.Context, writeMessages []*isb.WriteMessage, readMessage *isb.ReadMessage, messageToStep map[string][][]isb.Message) error {
+	if writeMessages == nil || len(writeMessages) == 0 {
 		return nil
 	}
-	if err := isdf.whereToStep(writeMessages, messageToStep, readMessage); err != nil {
-		isdf.opts.logger.Errorw("failed in whereToStep", zap.Error(err))
-		return err
+	//isdf.opts.logger.Info("MYDEBUG: ", writeMessages)
+	for _, message := range writeMessages {
+		if err := isdf.whereToStep(message, messageToStep, readMessage); err != nil {
+			isdf.opts.logger.Errorw("failed in whereToStep", zap.Error(err))
+			return err
+		}
 	}
 	// forward the messages to the edge buffer (could be multiple edges)
 	_, err := isdf.writeToBuffers(ctx, messageToStep)
@@ -617,19 +612,43 @@ func (isdf *InterStepDataForward) ackFromBuffer(ctx context.Context, offsets []i
 	return ctxClosedErr
 }
 
+// // writeToBuffers is a blocking call until all the messages have be forwarded to all the toBuffers, or a shutdown
+// // has been initiated while we are stuck looping on an InternalError.
+// func (isdf *InterStepDataForward) writeToBuffers(
+//
+//	ctx context.Context, messageToStep map[string][]isb.Message,
+//
+//	) (writeOffsets map[string][][]isb.Offset, err error) {
+//		// messageToStep contains all the to buffers, so the messages could be empty (conditional forwarding).
+//		// So writeOffsets also contains all the to buffers, but the returned offsets might be empty.
+//
+//		//writeOffsets = make(map[string][][]isb.Offset)
+//		//for toVertexName, toVertexMessages := range messageToStep {
+//		//	writeOffsets[toVertexName] = make([][]isb.Offset, len(toVertexMessages))
+//		//}
+//
+//		for toVertexName, toVertexBuffer := range isdf.toBuffers {
+//			for index, partition := range toVertexBuffer {
+//				_, err = isdf.writeToBuffer(ctx, partition, messageToStep[toVertexName][index])
+//				if err != nil {
+//					return nil, err
+//				}
+//			}
+//		}
+//		return nil, nil
+//	}
+//
 // writeToBuffers is a blocking call until all the messages have be forwarded to all the toBuffers, or a shutdown
 // has been initiated while we are stuck looping on an InternalError.
 func (isdf *InterStepDataForward) writeToBuffers(
-	ctx context.Context, messageToStep map[string][]isb.Message,
+	ctx context.Context, messageToStep map[string][][]isb.Message,
 ) (writeOffsets map[string][][]isb.Offset, err error) {
 	// messageToStep contains all the to buffers, so the messages could be empty (conditional forwarding).
 	// So writeOffsets also contains all the to buffers, but the returned offsets might be empty.
-
 	//writeOffsets = make(map[string][][]isb.Offset)
 	//for toVertexName, toVertexMessages := range messageToStep {
 	//	writeOffsets[toVertexName] = make([][]isb.Offset, len(toVertexMessages))
 	//}
-
 	for toVertexName, toVertexBuffer := range isdf.toBuffers {
 		for index, partition := range toVertexBuffer {
 			_, err = isdf.writeToBuffer(ctx, partition, messageToStep[toVertexName][index])
@@ -638,85 +657,80 @@ func (isdf *InterStepDataForward) writeToBuffers(
 			}
 		}
 	}
-	return nil, nil
+	return writeOffsets, nil
 }
 
 // writeToBuffer forwards an array of messages to a single buffer and is a blocking call or until shutdown has been initiated.
-func (isdf *InterStepDataForward) writeToBuffer(ctx context.Context, toBufferPartition isb.BufferWriter, msg isb.Message) (writeOffsets isb.Offset, err error) {
+func (isdf *InterStepDataForward) writeToBuffer(ctx context.Context, toBufferPartition isb.BufferWriter, messages []isb.Message) (writeOffsets []isb.Offset, err error) {
 	var (
-		//totalCount int
+		totalCount int
 		writeCount int
 		writeBytes float64
 	)
-	//totalCount = len(messages)
-	//writeOffsets = make([]isb.Offset, 0, totalCount)
+	totalCount = len(messages)
+	writeOffsets = make([]isb.Offset, 0, totalCount)
 
 	for {
-		// EXTRA
-		//var _writeOffsets []isb.Offset = nil
-		//var errs []error = nil
-		_writeOffsets, errs := toBufferPartition.WriteNew(ctx, msg)
+		_writeOffsets, errs := toBufferPartition.Write(ctx, messages)
 		// Note: this is an unwanted memory allocation during a happy path. We want only minimal allocation since using failedMessages is an unlikely path.
-		var failedMessages isb.Message
+		var failedMessages []isb.Message
 		needRetry := false
-		//for idx, msg := range messages {
-		// EXTRA
-		//if err != nil {
-		if err != nil {
-			// ATM there are no user-defined errors during write, all are InternalErrors.
-			// Non retryable error, drop the message. Non retryable errors are only returned
-			// when the buffer is full and the user has set the buffer full strategy to
-			// DiscardLatest or when the message is duplicate.
-			if errors.As(err, &isb.NonRetryableBufferWriteErr{}) {
-				metrics.DropMessagesCount.With(map[string]string{
-					metrics.LabelVertex:             isdf.vertexName,
-					metrics.LabelPipeline:           isdf.pipelineName,
-					metrics.LabelVertexType:         string(dfv1.VertexTypeSink),
-					metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica)),
-					metrics.LabelPartitionName:      toBufferPartition.GetName(),
-					metrics.LabelReason:             err.Error(),
-				}).Inc()
+		for idx, msg := range messages {
+			if err = errs[idx]; err != nil {
+				// ATM there are no user-defined errors during write, all are InternalErrors.
+				// Non retryable error, drop the message. Non retryable errors are only returned
+				// when the buffer is full and the user has set the buffer full strategy to
+				// DiscardLatest or when the message is duplicate.
+				if errors.As(err, &isb.NonRetryableBufferWriteErr{}) {
+					metrics.DropMessagesCount.With(map[string]string{
+						metrics.LabelVertex:             isdf.vertexName,
+						metrics.LabelPipeline:           isdf.pipelineName,
+						metrics.LabelVertexType:         string(dfv1.VertexTypeSink),
+						metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica)),
+						metrics.LabelPartitionName:      toBufferPartition.GetName(),
+						metrics.LabelReason:             err.Error(),
+					}).Inc()
 
-				metrics.DropBytesCount.With(map[string]string{
-					metrics.LabelVertex:             isdf.vertexName,
-					metrics.LabelPipeline:           isdf.pipelineName,
-					metrics.LabelVertexType:         string(dfv1.VertexTypeSink),
-					metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica)),
-					metrics.LabelPartitionName:      toBufferPartition.GetName(),
-					metrics.LabelReason:             err.Error(),
-				}).Add(float64(len(msg.Payload)))
+					metrics.DropBytesCount.With(map[string]string{
+						metrics.LabelVertex:             isdf.vertexName,
+						metrics.LabelPipeline:           isdf.pipelineName,
+						metrics.LabelVertexType:         string(dfv1.VertexTypeSink),
+						metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica)),
+						metrics.LabelPartitionName:      toBufferPartition.GetName(),
+						metrics.LabelReason:             err.Error(),
+					}).Add(float64(len(msg.Payload)))
 
-				isdf.opts.logger.Infow("Dropped message", zap.String("reason", err.Error()), zap.String("partition", toBufferPartition.GetName()), zap.String("vertex", isdf.vertexName), zap.String("pipeline", isdf.pipelineName))
+					isdf.opts.logger.Infow("Dropped message", zap.String("reason", err.Error()), zap.String("partition", toBufferPartition.GetName()), zap.String("vertex", isdf.vertexName), zap.String("pipeline", isdf.pipelineName))
+				} else {
+					needRetry = true
+					// we retry only failed messages
+					failedMessages = append(failedMessages, msg)
+					metrics.WriteMessagesError.With(map[string]string{metrics.LabelVertex: isdf.vertexName, metrics.LabelPipeline: isdf.pipelineName, metrics.LabelVertexType: string(dfv1.VertexTypeMapUDF), metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica)), metrics.LabelPartitionName: toBufferPartition.GetName()}).Inc()
+					// a shutdown can break the blocking loop caused due to InternalErr
+					if ok, _ := isdf.IsShuttingDown(); ok {
+						metrics.PlatformError.With(map[string]string{metrics.LabelVertex: isdf.vertexName, metrics.LabelPipeline: isdf.pipelineName, metrics.LabelVertexType: string(dfv1.VertexTypeMapUDF), metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica))}).Inc()
+						return writeOffsets, fmt.Errorf("writeToBuffer failed, Stop called while stuck on an internal error with failed messages:%d, %v", len(failedMessages), errs)
+					}
+				}
 			} else {
-				needRetry = true
-				// we retry only failed messages
-				failedMessages = msg
-				metrics.WriteMessagesError.With(map[string]string{metrics.LabelVertex: isdf.vertexName, metrics.LabelPipeline: isdf.pipelineName, metrics.LabelVertexType: string(dfv1.VertexTypeMapUDF), metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica)), metrics.LabelPartitionName: toBufferPartition.GetName()}).Inc()
-				// a shutdown can break the blocking loop caused due to InternalErr
-				if ok, _ := isdf.IsShuttingDown(); ok {
-					metrics.PlatformError.With(map[string]string{metrics.LabelVertex: isdf.vertexName, metrics.LabelPipeline: isdf.pipelineName, metrics.LabelVertexType: string(dfv1.VertexTypeMapUDF), metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica))}).Inc()
-					return writeOffsets, fmt.Errorf("writeToBuffer failed, Stop called while stuck on an internal error with failed messages: %v", errs)
+				writeCount++
+				writeBytes += float64(len(msg.Payload))
+				// we support write offsets only for jetstream
+				if _writeOffsets != nil {
+					writeOffsets = append(writeOffsets, _writeOffsets[idx])
 				}
 			}
-		} else {
-			writeCount++
-			writeBytes += float64(len(msg.Payload))
-			// we support write offsets only for jetstream
-			if _writeOffsets != nil {
-				writeOffsets = _writeOffsets
-			}
 		}
-		//}
 
 		if needRetry {
 			isdf.opts.logger.Errorw("Retrying failed messages",
-				zap.Any("errors", errs.Error()),
+				zap.Any("errors", errorArrayToMap(errs)),
 				zap.String(metrics.LabelPipeline, isdf.pipelineName),
 				zap.String(metrics.LabelVertex, isdf.vertexName),
 				zap.String(metrics.LabelPartitionName, toBufferPartition.GetName()),
 			)
 			// set messages to failed for the retry
-			msg = failedMessages
+			messages = failedMessages
 			// TODO: implement retry with backoff etc.
 			time.Sleep(isdf.opts.retryInterval)
 		} else {
@@ -724,13 +738,126 @@ func (isdf *InterStepDataForward) writeToBuffer(ctx context.Context, toBufferPar
 		}
 	}
 
-	//metrics.WriteMessagesCount.With(map[string]string{metrics.LabelVertex: isdf.vertexName, metrics.LabelPipeline: isdf.pipelineName, metrics.LabelVertexType: string(dfv1.VertexTypeMapUDF), metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica)), metrics.LabelPartitionName: toBufferPartition.GetName()}).Add(float64(writeCount))
-	//metrics.WriteBytesCount.With(map[string]string{metrics.LabelVertex: isdf.vertexName, metrics.LabelPipeline: isdf.pipelineName, metrics.LabelVertexType: string(dfv1.VertexTypeMapUDF), metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica)), metrics.LabelPartitionName: toBufferPartition.GetName()}).Add(writeBytes)
+	metrics.WriteMessagesCount.With(map[string]string{metrics.LabelVertex: isdf.vertexName, metrics.LabelPipeline: isdf.pipelineName, metrics.LabelVertexType: string(dfv1.VertexTypeMapUDF), metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica)), metrics.LabelPartitionName: toBufferPartition.GetName()}).Add(float64(writeCount))
+	metrics.WriteBytesCount.With(map[string]string{metrics.LabelVertex: isdf.vertexName, metrics.LabelPipeline: isdf.pipelineName, metrics.LabelVertexType: string(dfv1.VertexTypeMapUDF), metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica)), metrics.LabelPartitionName: toBufferPartition.GetName()}).Add(writeBytes)
 	return writeOffsets, nil
 }
 
+//
+//// writeToBuffer forwards an array of messages to a single buffer and is a blocking call or until shutdown has been initiated.
+//func (isdf *InterStepDataForward) writeToBuffer(ctx context.Context, toBufferPartition isb.BufferWriter, msg isb.Message) (writeOffsets isb.Offset, err error) {
+//	var (
+//		//totalCount int
+//		writeCount int
+//		writeBytes float64
+//	)
+//	//totalCount = len(messages)
+//	//writeOffsets = make([]isb.Offset, 0, totalCount)
+//
+//	for {
+//		// EXTRA
+//		//var _writeOffsets []isb.Offset = nil
+//		//var errs []error = nil
+//		_writeOffsets, errs := toBufferPartition.WriteNew(ctx, msg)
+//		// Note: this is an unwanted memory allocation during a happy path. We want only minimal allocation since using failedMessages is an unlikely path.
+//		var failedMessages isb.Message
+//		needRetry := false
+//		//for idx, msg := range messages {
+//		// EXTRA
+//		//if err != nil {
+//		if err != nil {
+//			// ATM there are no user-defined errors during write, all are InternalErrors.
+//			// Non retryable error, drop the message. Non retryable errors are only returned
+//			// when the buffer is full and the user has set the buffer full strategy to
+//			// DiscardLatest or when the message is duplicate.
+//			if errors.As(err, &isb.NonRetryableBufferWriteErr{}) {
+//				metrics.DropMessagesCount.With(map[string]string{
+//					metrics.LabelVertex:             isdf.vertexName,
+//					metrics.LabelPipeline:           isdf.pipelineName,
+//					metrics.LabelVertexType:         string(dfv1.VertexTypeSink),
+//					metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica)),
+//					metrics.LabelPartitionName:      toBufferPartition.GetName(),
+//					metrics.LabelReason:             err.Error(),
+//				}).Inc()
+//
+//				metrics.DropBytesCount.With(map[string]string{
+//					metrics.LabelVertex:             isdf.vertexName,
+//					metrics.LabelPipeline:           isdf.pipelineName,
+//					metrics.LabelVertexType:         string(dfv1.VertexTypeSink),
+//					metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica)),
+//					metrics.LabelPartitionName:      toBufferPartition.GetName(),
+//					metrics.LabelReason:             err.Error(),
+//				}).Add(float64(len(msg.Payload)))
+//
+//				isdf.opts.logger.Infow("Dropped message", zap.String("reason", err.Error()), zap.String("partition", toBufferPartition.GetName()), zap.String("vertex", isdf.vertexName), zap.String("pipeline", isdf.pipelineName))
+//			} else {
+//				needRetry = true
+//				// we retry only failed messages
+//				failedMessages = msg
+//				metrics.WriteMessagesError.With(map[string]string{metrics.LabelVertex: isdf.vertexName, metrics.LabelPipeline: isdf.pipelineName, metrics.LabelVertexType: string(dfv1.VertexTypeMapUDF), metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica)), metrics.LabelPartitionName: toBufferPartition.GetName()}).Inc()
+//				// a shutdown can break the blocking loop caused due to InternalErr
+//				if ok, _ := isdf.IsShuttingDown(); ok {
+//					metrics.PlatformError.With(map[string]string{metrics.LabelVertex: isdf.vertexName, metrics.LabelPipeline: isdf.pipelineName, metrics.LabelVertexType: string(dfv1.VertexTypeMapUDF), metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica))}).Inc()
+//					return writeOffsets, fmt.Errorf("writeToBuffer failed, Stop called while stuck on an internal error with failed messages: %v", errs)
+//				}
+//			}
+//		} else {
+//			writeCount++
+//			writeBytes += float64(len(msg.Payload))
+//			// we support write offsets only for jetstream
+//			if _writeOffsets != nil {
+//				writeOffsets = _writeOffsets
+//			}
+//		}
+//		//}
+//
+//		if needRetry {
+//			isdf.opts.logger.Errorw("Retrying failed messages",
+//				zap.Any("errors", errs.Error()),
+//				zap.String(metrics.LabelPipeline, isdf.pipelineName),
+//				zap.String(metrics.LabelVertex, isdf.vertexName),
+//				zap.String(metrics.LabelPartitionName, toBufferPartition.GetName()),
+//			)
+//			// set messages to failed for the retry
+//			msg = failedMessages
+//			// TODO: implement retry with backoff etc.
+//			time.Sleep(isdf.opts.retryInterval)
+//		} else {
+//			break
+//		}
+//	}
+//
+//	//metrics.WriteMessagesCount.With(map[string]string{metrics.LabelVertex: isdf.vertexName, metrics.LabelPipeline: isdf.pipelineName, metrics.LabelVertexType: string(dfv1.VertexTypeMapUDF), metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica)), metrics.LabelPartitionName: toBufferPartition.GetName()}).Add(float64(writeCount))
+//	//metrics.WriteBytesCount.With(map[string]string{metrics.LabelVertex: isdf.vertexName, metrics.LabelPipeline: isdf.pipelineName, metrics.LabelVertexType: string(dfv1.VertexTypeMapUDF), metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica)), metrics.LabelPartitionName: toBufferPartition.GetName()}).Add(writeBytes)
+//	return writeOffsets, nil
+//}
+
+//// whereToStep executes the WhereTo interfaces and then updates the to step's writeToBuffers buffer.
+//func (isdf *InterStepDataForward) whereToStep(writeMessage *isb.WriteMessage, messageToStep map[string][]isb.Message, readMessage *isb.ReadMessage) error {
+//	// call WhereTo and drop it on errors
+//	to, err := isdf.FSD.WhereTo(writeMessage.Keys, writeMessage.Tags, writeMessage.ID)
+//	if err != nil {
+//		isdf.opts.logger.Errorw("failed in whereToStep", zap.Error(isb.MessageWriteErr{Name: isdf.fromBufferPartition.GetName(), Header: readMessage.Header, Body: readMessage.Body, Message: fmt.Sprintf("WhereTo failed, %s", err)}))
+//		// a shutdown can break the blocking loop caused due to InternalErr
+//		if ok, _ := isdf.IsShuttingDown(); ok {
+//			err := fmt.Errorf("whereToStep, Stop called while stuck on an internal error, %v", err)
+//			metrics.PlatformError.With(map[string]string{metrics.LabelVertex: isdf.vertexName, metrics.LabelPipeline: isdf.pipelineName, metrics.LabelVertexType: string(dfv1.VertexTypeMapUDF), metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica))}).Inc()
+//			return err
+//		}
+//		return err
+//	}
+//
+//	for _, t := range to {
+//		if _, ok := messageToStep[t.ToVertexName]; !ok {
+//			isdf.opts.logger.Errorw("failed in whereToStep", zap.Error(isb.MessageWriteErr{Name: isdf.fromBufferPartition.GetName(), Header: readMessage.Header, Body: readMessage.Body, Message: fmt.Sprintf("no such destination (%s)", t.ToVertexName)}))
+//		}
+//		messageToStep[t.ToVertexName][t.ToVertexPartitionIdx] = writeMessage.Message
+//	}
+//	return nil
+//}
+
 // whereToStep executes the WhereTo interfaces and then updates the to step's writeToBuffers buffer.
-func (isdf *InterStepDataForward) whereToStep(writeMessage *isb.WriteMessage, messageToStep map[string][]isb.Message, readMessage *isb.ReadMessage) error {
+func (isdf *InterStepDataForward) whereToStep(writeMessage *isb.WriteMessage, messageToStep map[string][][]isb.Message, readMessage *isb.ReadMessage) error {
 	// call WhereTo and drop it on errors
 	to, err := isdf.FSD.WhereTo(writeMessage.Keys, writeMessage.Tags, writeMessage.ID)
 	if err != nil {
@@ -748,7 +875,7 @@ func (isdf *InterStepDataForward) whereToStep(writeMessage *isb.WriteMessage, me
 		if _, ok := messageToStep[t.ToVertexName]; !ok {
 			isdf.opts.logger.Errorw("failed in whereToStep", zap.Error(isb.MessageWriteErr{Name: isdf.fromBufferPartition.GetName(), Header: readMessage.Header, Body: readMessage.Body, Message: fmt.Sprintf("no such destination (%s)", t.ToVertexName)}))
 		}
-		messageToStep[t.ToVertexName][t.ToVertexPartitionIdx] = writeMessage.Message
+		messageToStep[t.ToVertexName][t.ToVertexPartitionIdx] = append(messageToStep[t.ToVertexName][t.ToVertexPartitionIdx], writeMessage.Message)
 	}
 	return nil
 }
@@ -764,69 +891,70 @@ func errorArrayToMap(errs []error) map[string]int64 {
 	return result
 }
 
-func (isdf *InterStepDataForward) createNewRequest(msg *isb.ReadMessage) *types.RequestFlatmap {
+func (isdf *InterStepDataForward) createNewRequest(msg *isb.ReadMessage) {
 	// Add the request to the tracker, and get the unique UUID corresponding to it
-	return isdf.requestTracker.AddRequest(msg)
+	isdf.requestTracker.AddRequest(msg)
 }
 
-// parseMapResponse takes a proto response from the gRPC and converts this into a ResponseFlatmap type,
-// this also checks if this was a special EOR response, in such a case we indicate that the request corresponding
-// to the response can be safely removed from the tracker.
-func (isdf *InterStepDataForward) parseMapResponse(resp *flatmappb.MapResponse, trackedRequest *types.RequestFlatmap) (*isb.WriteMessage, bool, int32) {
-	result := resp.Result
-	eor := result.GetEOR()
-	total := result.GetTotal()
-
-	parentRequest := trackedRequest.Request
-	// Request has completed remove from the tracker module
-	if eor == true {
-		return nil, true, total
-		//return &types.ResponseFlatmap{
-		//	//ParentMessage: parentRequest,
-		//	Uid:         uid,
-		//	RespMessage: nil,
-		//	AckIt:       true,
-		//	Total:       int64(resp.Result.Total),
-		//}, true, uid
-	}
-	keys := result.GetKeys()
-	taggedMessage := &isb.WriteMessage{
-		Message: isb.Message{
-			Header: isb.Header{
-				MessageInfo: parentRequest.MessageInfo,
-				// We need this to be unique so that the ISB can execute its Dedup logic
-				// this ID should be such that even when the same response is processed and received
-				// again from the UDF, we still assign it the same ID.
-				// The ID here will be a concat of the three values
-				// parentRequest.ReadOffset - vertexName - result.Index
-				//
-				// ReadOffset - Will be the read offset of the request which corresponds to this response.
-				// We have this stored in our tracker.
-				//
-				// VertexName - the name of the vertex from which this response is generated, this is
-				// important to ensure that we can differentiate between messages emitted from 2 map vertices
-				//
-				// Result Index - This parameter is added on the SDK side.
-				// We add the index of the message from the messages slice to the individual response.
-				// TODO(stream): explore if there can be more robust ways to do this
-				ID:   getMessageId(trackedRequest.ReadOffset.String(), isdf.vertexName, result.GetIndex()),
-				Keys: keys,
-			},
-			Body: isb.Body{
-				Payload: result.GetValue(),
-			},
-		},
-		Tags: result.GetTags(),
-	}
-	return taggedMessage, false, total
-}
-
-func getMessageId(offset string, vertexName string, index string) string {
-	var idString strings.Builder
-	idString.WriteString(offset)
-	idString.WriteString("-")
-	idString.WriteString(vertexName)
-	idString.WriteString("-")
-	idString.WriteString(index)
-	return idString.String()
-}
+//
+//// parseMapResponse takes a proto response from the gRPC and converts this into a ResponseFlatmap type,
+//// this also checks if this was a special EOR response, in such a case we indicate that the request corresponding
+//// to the response can be safely removed from the tracker.
+//func (isdf *InterStepDataForward) parseMapResponse(resp *flatmappb.MapResponse, trackedRequest *types.RequestFlatmap) (*isb.WriteMessage, bool, int32) {
+//	result := resp.Result
+//	eor := result.GetEOR()
+//	total := result.GetTotal()
+//
+//	parentRequest := trackedRequest.Request
+//	// Request has completed remove from the tracker module
+//	if eor == true {
+//		return nil, true, total
+//		//return &types.ResponseFlatmap{
+//		//	//ParentMessage: parentRequest,
+//		//	Uid:         uid,
+//		//	RespMessage: nil,
+//		//	AckIt:       true,
+//		//	Total:       int64(resp.Result.Total),
+//		//}, true, uid
+//	}
+//	keys := result.GetKeys()
+//	taggedMessage := &isb.WriteMessage{
+//		Message: isb.Message{
+//			Header: isb.Header{
+//				MessageInfo: parentRequest.MessageInfo,
+//				// We need this to be unique so that the ISB can execute its Dedup logic
+//				// this ID should be such that even when the same response is processed and received
+//				// again from the UDF, we still assign it the same ID.
+//				// The ID here will be a concat of the three values
+//				// parentRequest.ReadOffset - vertexName - result.Index
+//				//
+//				// ReadOffset - Will be the read offset of the request which corresponds to this response.
+//				// We have this stored in our tracker.
+//				//
+//				// VertexName - the name of the vertex from which this response is generated, this is
+//				// important to ensure that we can differentiate between messages emitted from 2 map vertices
+//				//
+//				// Result Index - This parameter is added on the SDK side.
+//				// We add the index of the message from the messages slice to the individual response.
+//				// TODO(stream): explore if there can be more robust ways to do this
+//				ID:   getMessageId(trackedRequest.ReadOffset.String(), isdf.vertexName, result.GetIndex()),
+//				Keys: keys,
+//			},
+//			Body: isb.Body{
+//				Payload: result.GetValue(),
+//			},
+//		},
+//		Tags: result.GetTags(),
+//	}
+//	return taggedMessage, false, total
+//}
+//
+//func getMessageId(offset string, vertexName string, index string) string {
+//	var idString strings.Builder
+//	idString.WriteString(offset)
+//	idString.WriteString("-")
+//	idString.WriteString(vertexName)
+//	idString.WriteString("-")
+//	idString.WriteString(index)
+//	return idString.String()
+//}

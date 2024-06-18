@@ -31,3 +31,9 @@ type RequestFlatmap struct {
 	Uid        string
 	ReadOffset isb.Offset
 }
+
+// ReadWriteMessagePair represents a read message and its processed (via flatmap UDF) write messages.
+type ReadWriteMessagePair struct {
+	ReadMessage   *isb.ReadMessage
+	WriteMessages *[]*isb.WriteMessage
+}
