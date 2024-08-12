@@ -95,6 +95,7 @@ impl Label {
 }
 
 pub struct ForwardMetrics {
+    pub mvtx_read_total
     pub forward_read_total: Family<Vec<(String, String)>, Counter>,
     pub forward_ack_total: Family<Vec<(String, String)>, Counter>,
     pub forward_write_total: Family<Vec<(String, String)>, Counter>,
@@ -115,7 +116,7 @@ impl ForwardMetrics {
         // TODO: use the log_to_power_of_sqrt2_bins? or use the default exponential buckets?
         let forward_a_chunk_total_time =
             Family::<Vec<(String, String)>, Histogram>::new_with_constructor(|| {
-                Histogram::new(exponential_buckets(1.0, 2.0, 10))
+                Histogram::new(exponential_buckets(100.0, 60000000.0 * 15.0, 10))
             });
 
         let metrics = ForwardMetrics {
