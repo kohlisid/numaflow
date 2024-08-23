@@ -7498,30 +7498,22 @@ spec:
                                   default: 1ms
                                   type: string
                                 factor:
+                                  default: "1.0"
                                   properties:
-                                    float64Val:
+                                    value:
                                       format: byte
                                       type: string
-                                    strVal:
-                                      type: string
-                                    type:
-                                      format: int64
-                                      type: integer
                                   required:
-                                  - type
+                                  - value
                                   type: object
                                 jitter:
+                                  default: "0"
                                   properties:
-                                    float64Val:
+                                    value:
                                       format: byte
                                       type: string
-                                    strVal:
-                                      type: string
-                                    type:
-                                      format: int64
-                                      type: integer
                                   required:
-                                  - type
+                                  - value
                                   type: object
                                 steps:
                                   default: 0

@@ -821,6 +821,65 @@ Container template for the side inputs watcher container.
 
 </table>
 
+<h3 id="numaflow.numaproj.io/v1alpha1.Amount">
+
+Amount
+</h3>
+
+<p>
+
+(<em>Appears on:</em>
+<a href="#numaflow.numaproj.io/v1alpha1.Backoff">Backoff</a>)
+</p>
+
+<p>
+
+<p>
+
+Amount represent a numeric amount.
+</p>
+
+</p>
+
+<table>
+
+<thead>
+
+<tr>
+
+<th>
+
+Field
+</th>
+
+<th>
+
+Description
+</th>
+
+</tr>
+
+</thead>
+
+<tbody>
+
+<tr>
+
+<td>
+
+<code>value</code></br> <em> \[\]byte </em>
+</td>
+
+<td>
+
+</td>
+
+</tr>
+
+</tbody>
+
+</table>
+
 <h3 id="numaflow.numaproj.io/v1alpha1.Authorization">
 
 Authorization
@@ -955,8 +1014,7 @@ occurs.
 <td>
 
 <code>factor</code></br> <em>
-<a href="#numaflow.numaproj.io/v1alpha1.Float64OrString">
-Float64OrString </a> </em>
+<a href="#numaflow.numaproj.io/v1alpha1.Amount"> Amount </a> </em>
 </td>
 
 <td>
@@ -981,8 +1039,7 @@ contribute to the updates to the duration parameter.
 <td>
 
 <code>jitter</code></br> <em>
-<a href="#numaflow.numaproj.io/v1alpha1.Float64OrString">
-Float64OrString </a> </em>
+<a href="#numaflow.numaproj.io/v1alpha1.Amount"> Amount </a> </em>
 </td>
 
 <td>
@@ -2086,12 +2143,6 @@ Streaming should be set to true if the reduce udf is streaming.
 
 Float64OrString
 </h3>
-
-<p>
-
-(<em>Appears on:</em>
-<a href="#numaflow.numaproj.io/v1alpha1.Backoff">Backoff</a>)
-</p>
 
 <p>
 

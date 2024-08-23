@@ -17781,6 +17781,10 @@
       ],
       "type": "object"
     },
+    "io.numaproj.numaflow.v1alpha1.Amount": {
+      "description": "Amount represent a numeric amount.",
+      "type": "number"
+    },
     "io.numaproj.numaflow.v1alpha1.Authorization": {
       "properties": {
         "token": {
@@ -17802,11 +17806,11 @@
           "description": "Duration sets the initial delay before the first retry, after a failure occurs."
         },
         "factor": {
-          "$ref": "#/definitions/io.numaproj.numaflow.v1alpha1.Float64OrString",
+          "$ref": "#/definitions/io.numaproj.numaflow.v1alpha1.Amount",
           "description": "Factor determines how much the duration increases after each retry iteration. The delay before the subsequent retry will be the previous delay multiplied by this factor. Duration is multiplied by factor each iteration, if factor is not zero and the limits imposed by Steps and Cap have not been reached. Should not be negative. The jitter does not contribute to the updates to the duration parameter."
         },
         "jitter": {
-          "$ref": "#/definitions/io.numaproj.numaflow.v1alpha1.Float64OrString",
+          "$ref": "#/definitions/io.numaproj.numaflow.v1alpha1.Amount",
           "description": "The sleep at each iteration is the duration plus an additional amount chosen uniformly at random from the interval between zero and `jitter*duration`."
         },
         "steps": {
