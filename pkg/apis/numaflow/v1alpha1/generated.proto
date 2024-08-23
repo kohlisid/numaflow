@@ -201,6 +201,46 @@ message Authorization {
   optional k8s.io.api.core.v1.SecretKeySelector token = 1;
 }
 
+// Backoff defines parameters for a backoff retry strategy, used to systematically increase the delay between retries.
+message Backoff {
+  // Duration sets the initial delay before the first retry, after a failure occurs.
+  // +kubebuilder:default="1ms"
+  // +optional
+  optional k8s.io.apimachinery.pkg.apis.meta.v1.Duration duration = 1;
+
+  // Factor determines how much the duration increases after each retry iteration.
+  // The delay before the subsequent retry will be the previous delay multiplied by this factor.
+  // Duration is multiplied by factor each iteration, if factor is not zero
+  // and the limits imposed by Steps and Cap have not been reached.
+  // Should not be negative.
+  // The jitter does not contribute to the updates to the duration parameter.
+  // +optional
+  optional Float64OrString factor = 2;
+
+  // The sleep at each iteration is the duration plus an additional
+  // amount chosen uniformly at random from the interval between
+  // zero and `jitter*duration`.
+  // +optional
+  optional Float64OrString jitter = 3;
+
+  // The remaining number of iterations in which the duration
+  // parameter may change (but progress can be stopped earlier by
+  // hitting the cap). If not positive, the duration is not
+  // changed. Used for exponential backoff in combination with
+  // Factor and Cap.
+  // +optional
+  // +kubebuilder:default=0
+  optional uint32 steps = 4;
+
+  // A limit on revised values of the duration parameter. If a
+  // multiplication by the factor parameter would make the duration
+  // exceed the cap then the duration is set to the cap and the
+  // steps parameter is set to zero.
+  // Note: When the duration hits the cap, no further retries would occur
+  // +optional
+  optional k8s.io.apimachinery.pkg.apis.meta.v1.Duration cap = 5;
+}
+
 // BasicAuth represents the basic authentication approach which contains a user name and a password.
 message BasicAuth {
   // Secret for auth user
@@ -341,6 +381,14 @@ message FixedWindow {
   // +optional
   // Streaming should be set to true if the reduce udf is streaming.
   optional bool streaming = 2;
+}
+
+message Float64OrString {
+  optional int64 type = 1;
+
+  optional bytes float64Val = 2;
+
+  optional string strVal = 3;
 }
 
 message ForwardConditions {
@@ -1213,6 +1261,19 @@ message RedisSettings {
   optional string sentinel = 4;
 }
 
+// RetryStrategy struct encapsulates the settings for retrying operations in the event of failures.
+// It includes a BackOff strategy to manage the timing of retries and defines the action to take upon failure.
+message RetryStrategy {
+  // BackOff specifies the parameters for the backoff strategy, controlling how delays between retries should increase.
+  // +optional
+  optional Backoff backoff = 1;
+
+  // OnFailure specifies the action to take when a retry fails. The default action is to retry.
+  // +optional
+  // +kubebuilder:default="retry"
+  optional string onFailure = 2;
+}
+
 message SASL {
   // SASL mechanism to use
   optional string mechanism = 1;
@@ -1377,6 +1438,13 @@ message Sink {
   // initiated if the ud-sink response field sets it.
   // +optional
   optional AbstractSink fallback = 2;
+
+  // RetryStrategy defines the criteria and method for retrying a failed write operation in the Sink.
+  // This type is used to customize how retries are handled, ensuring messages that fail to be delivered
+  // can be resent based on the configured strategy. It includes settings for backoff strategies and
+  // specific actions to take on failures.
+  // +optional
+  optional RetryStrategy retryStrategy = 3;
 }
 
 // SlidingWindow describes a sliding window

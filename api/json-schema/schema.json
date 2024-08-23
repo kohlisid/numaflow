@@ -17790,6 +17790,33 @@
       },
       "type": "object"
     },
+    "io.numaproj.numaflow.v1alpha1.Backoff": {
+      "description": "Backoff defines parameters for a backoff retry strategy, used to systematically increase the delay between retries.",
+      "properties": {
+        "cap": {
+          "$ref": "#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.Duration",
+          "description": "A limit on revised values of the duration parameter. If a multiplication by the factor parameter would make the duration exceed the cap then the duration is set to the cap and the steps parameter is set to zero. Note: When the duration hits the cap, no further retries would occur"
+        },
+        "duration": {
+          "$ref": "#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.Duration",
+          "description": "Duration sets the initial delay before the first retry, after a failure occurs."
+        },
+        "factor": {
+          "$ref": "#/definitions/io.numaproj.numaflow.v1alpha1.Float64OrString",
+          "description": "Factor determines how much the duration increases after each retry iteration. The delay before the subsequent retry will be the previous delay multiplied by this factor. Duration is multiplied by factor each iteration, if factor is not zero and the limits imposed by Steps and Cap have not been reached. Should not be negative. The jitter does not contribute to the updates to the duration parameter."
+        },
+        "jitter": {
+          "$ref": "#/definitions/io.numaproj.numaflow.v1alpha1.Float64OrString",
+          "description": "The sleep at each iteration is the duration plus an additional amount chosen uniformly at random from the interval between zero and `jitter*duration`."
+        },
+        "steps": {
+          "description": "The remaining number of iterations in which the duration parameter may change (but progress can be stopped earlier by hitting the cap). If not positive, the duration is not changed. Used for exponential backoff in combination with Factor and Cap.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "io.numaproj.numaflow.v1alpha1.BasicAuth": {
       "description": "BasicAuth represents the basic authentication approach which contains a user name and a password.",
       "properties": {
@@ -18060,6 +18087,10 @@
         }
       },
       "type": "object"
+    },
+    "io.numaproj.numaflow.v1alpha1.Float64OrString": {
+      "format": "float64-or-string",
+      "type": "string"
     },
     "io.numaproj.numaflow.v1alpha1.ForwardConditions": {
       "properties": {
@@ -19683,6 +19714,20 @@
       },
       "type": "object"
     },
+    "io.numaproj.numaflow.v1alpha1.RetryStrategy": {
+      "description": "RetryStrategy struct encapsulates the settings for retrying operations in the event of failures. It includes a BackOff strategy to manage the timing of retries and defines the action to take upon failure.",
+      "properties": {
+        "backoff": {
+          "$ref": "#/definitions/io.numaproj.numaflow.v1alpha1.Backoff",
+          "description": "BackOff specifies the parameters for the backoff strategy, controlling how delays between retries should increase."
+        },
+        "onFailure": {
+          "description": "OnFailure specifies the action to take when a retry fails. The default action is to retry.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "io.numaproj.numaflow.v1alpha1.SASL": {
       "properties": {
         "gssapi": {
@@ -19980,6 +20025,10 @@
         "log": {
           "$ref": "#/definitions/io.numaproj.numaflow.v1alpha1.Log",
           "description": "Log sink is used to write the data to the log."
+        },
+        "retryStrategy": {
+          "$ref": "#/definitions/io.numaproj.numaflow.v1alpha1.RetryStrategy",
+          "description": "RetryStrategy defines the criteria and method for retrying a failed write operation in the Sink. This type is used to customize how retries are handled, ensuring messages that fail to be delivered can be resent based on the configured strategy. It includes settings for backoff strategies and specific actions to take on failures."
         },
         "udsink": {
           "$ref": "#/definitions/io.numaproj.numaflow.v1alpha1.UDSink",

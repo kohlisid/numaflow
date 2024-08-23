@@ -367,6 +367,17 @@ func (df *DataForward) writeToSink(ctx context.Context, sinkWriter sinker.SinkWr
 	writeOffsets := make([]isb.Offset, 0, len(messages))
 	var fallbackMessages []isb.Message
 
+	// extract the failureStrategy
+	failStrategy := df.opts.retryStrategy.OnFailure
+	// if we are executing writing to a fallback sink, then shift to Retry on fail
+	if isFbSinkWriter {
+		failStrategy = dfv1.OnFailRetry
+	}
+	// extract the backOff conditions for the retry logic, when the isFbSinkWriter is true, then
+	// this function returns an infinite backoff
+	backoffCond := df.getBackOffConditions(isFbSinkWriter)
+	retryCount := backoffCond.Steps
+
 	for {
 		_writeOffsets, errs := sinkWriter.Write(ctx, messages)
 		// Note: this is an unwanted memory allocation during a happy path. We want only minimal allocation since using failedMessages is an unlikely path.
@@ -421,7 +432,28 @@ func (df *DataForward) writeToSink(ctx context.Context, sinkWriter sinker.SinkWr
 			// set messages to failed for the retry
 			messages = failedMessages
 			// TODO: implement retry with backoff etc.
-			time.Sleep(df.opts.retryInterval)
+			time.Sleep(backoffCond.Duration)
+			retryCount -= 1
+			// We are done with the max retries allowed, now use the failStrategy
+			// to decide the next steps
+			if retryCount == 0 {
+				df.opts.logger.Info("MYDEBUG: I'm not done yet")
+				switch failStrategy {
+				case dfv1.OnFailRetry:
+					// If on failure, we keep on retrying then lets continue the loop and try all again
+					continue
+				case dfv1.OnFailFallback:
+					// If onFail we have to divert messages to fallback, lets add all failed messages to fallback
+					fallbackMessages = append(fallbackMessages, messages...)
+					break
+				case dfv1.OnFailDrop:
+					// If on fail we want to Drop in that case lets, not retry further a
+					df.opts.logger.Info("Dropping the failed messages after retry in the Sink")
+					// Update the drop metric count with the messages left
+					metrics.DropMessagesCount.With(map[string]string{metrics.LabelVertex: df.vertexName, metrics.LabelPipeline: df.pipelineName, metrics.LabelVertexType: string(dfv1.VertexTypeSink), metrics.LabelVertexReplicaIndex: strconv.Itoa(int(df.vertexReplica)), metrics.LabelPartitionName: sinkWriter.GetName()}).Add(float64(len(messages)))
+					break
+				}
+			}
 		} else {
 			break
 		}
@@ -442,4 +474,28 @@ func errorArrayToMap(errs []error) map[string]int64 {
 		}
 	}
 	return result
+}
+
+func (df *DataForward) getBackOffConditions(infinite bool) wait.Backoff {
+	// if we require infinite backoff return an infinite retry with fixed interval
+	if infinite {
+		return wait.Backoff{
+			Steps:    int(DefaultRetrySteps),
+			Duration: DefaultRetrySleepInterval,
+			Factor:   DefaultRetryFactor,
+			Jitter:   DefaultRetryJitter,
+		}
+	}
+	backoffCond := wait.Backoff{
+		Duration: df.opts.retryStrategy.BackOff.Duration.Duration,
+		Factor:   df.opts.retryStrategy.BackOff.Factor.Float64Value(),
+		Jitter:   df.opts.retryStrategy.BackOff.Jitter.Float64Value(),
+		// +1 for the first try which should always be done
+		Steps: int(*df.opts.retryStrategy.BackOff.Steps) + 1,
+	}
+	if df.opts.retryStrategy.BackOff.Cap != nil {
+		backoffCond.Cap = df.opts.retryStrategy.BackOff.Cap.Duration
+	}
+
+	return backoffCond
 }

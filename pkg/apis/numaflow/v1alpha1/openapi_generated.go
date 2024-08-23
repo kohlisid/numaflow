@@ -34,6 +34,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.AbstractSink":                     schema_pkg_apis_numaflow_v1alpha1_AbstractSink(ref),
 		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.AbstractVertex":                   schema_pkg_apis_numaflow_v1alpha1_AbstractVertex(ref),
 		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.Authorization":                    schema_pkg_apis_numaflow_v1alpha1_Authorization(ref),
+		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.Backoff":                          schema_pkg_apis_numaflow_v1alpha1_Backoff(ref),
 		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.BasicAuth":                        schema_pkg_apis_numaflow_v1alpha1_BasicAuth(ref),
 		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.Blackhole":                        schema_pkg_apis_numaflow_v1alpha1_Blackhole(ref),
 		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.BufferServiceConfig":              schema_pkg_apis_numaflow_v1alpha1_BufferServiceConfig(ref),
@@ -43,6 +44,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.DaemonTemplate":                   schema_pkg_apis_numaflow_v1alpha1_DaemonTemplate(ref),
 		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.Edge":                             schema_pkg_apis_numaflow_v1alpha1_Edge(ref),
 		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.FixedWindow":                      schema_pkg_apis_numaflow_v1alpha1_FixedWindow(ref),
+		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.Float64OrString":                  schema_pkg_apis_numaflow_v1alpha1_Float64OrString(ref),
 		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.ForwardConditions":                schema_pkg_apis_numaflow_v1alpha1_ForwardConditions(ref),
 		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.Function":                         schema_pkg_apis_numaflow_v1alpha1_Function(ref),
 		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.GSSAPI":                           schema_pkg_apis_numaflow_v1alpha1_GSSAPI(ref),
@@ -91,6 +93,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.RedisBufferService":               schema_pkg_apis_numaflow_v1alpha1_RedisBufferService(ref),
 		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.RedisConfig":                      schema_pkg_apis_numaflow_v1alpha1_RedisConfig(ref),
 		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.RedisSettings":                    schema_pkg_apis_numaflow_v1alpha1_RedisSettings(ref),
+		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.RetryStrategy":                    schema_pkg_apis_numaflow_v1alpha1_RetryStrategy(ref),
 		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.SASL":                             schema_pkg_apis_numaflow_v1alpha1_SASL(ref),
 		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.SASLPlain":                        schema_pkg_apis_numaflow_v1alpha1_SASLPlain(ref),
 		"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.Scale":                            schema_pkg_apis_numaflow_v1alpha1_Scale(ref),
@@ -565,6 +568,52 @@ func schema_pkg_apis_numaflow_v1alpha1_Authorization(ref common.ReferenceCallbac
 		},
 		Dependencies: []string{
 			"k8s.io/api/core/v1.SecretKeySelector"},
+	}
+}
+
+func schema_pkg_apis_numaflow_v1alpha1_Backoff(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "Backoff defines parameters for a backoff retry strategy, used to systematically increase the delay between retries.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"duration": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Duration sets the initial delay before the first retry, after a failure occurs.",
+							Ref:         ref("k8s.io/apimachinery/pkg/apis/meta/v1.Duration"),
+						},
+					},
+					"factor": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Factor determines how much the duration increases after each retry iteration. The delay before the subsequent retry will be the previous delay multiplied by this factor. Duration is multiplied by factor each iteration, if factor is not zero and the limits imposed by Steps and Cap have not been reached. Should not be negative. The jitter does not contribute to the updates to the duration parameter.",
+							Ref:         ref("github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.Float64OrString"),
+						},
+					},
+					"jitter": {
+						SchemaProps: spec.SchemaProps{
+							Description: "The sleep at each iteration is the duration plus an additional amount chosen uniformly at random from the interval between zero and `jitter*duration`.",
+							Ref:         ref("github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.Float64OrString"),
+						},
+					},
+					"steps": {
+						SchemaProps: spec.SchemaProps{
+							Description: "The remaining number of iterations in which the duration parameter may change (but progress can be stopped earlier by hitting the cap). If not positive, the duration is not changed. Used for exponential backoff in combination with Factor and Cap.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"cap": {
+						SchemaProps: spec.SchemaProps{
+							Description: "A limit on revised values of the duration parameter. If a multiplication by the factor parameter would make the duration exceed the cap then the duration is set to the cap and the steps parameter is set to zero. Note: When the duration hits the cap, no further retries would occur",
+							Ref:         ref("k8s.io/apimachinery/pkg/apis/meta/v1.Duration"),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.Float64OrString", "k8s.io/apimachinery/pkg/apis/meta/v1.Duration"},
 	}
 }
 
@@ -1091,6 +1140,17 @@ func schema_pkg_apis_numaflow_v1alpha1_FixedWindow(ref common.ReferenceCallback)
 		},
 		Dependencies: []string{
 			"k8s.io/apimachinery/pkg/apis/meta/v1.Duration"},
+	}
+}
+
+func schema_pkg_apis_numaflow_v1alpha1_Float64OrString(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Type:   Float64OrString{}.OpenAPISchemaType(),
+				Format: Float64OrString{}.OpenAPISchemaFormat(),
+			},
+		},
 	}
 }
 
@@ -4052,6 +4112,34 @@ func schema_pkg_apis_numaflow_v1alpha1_RedisSettings(ref common.ReferenceCallbac
 	}
 }
 
+func schema_pkg_apis_numaflow_v1alpha1_RetryStrategy(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "RetryStrategy struct encapsulates the settings for retrying operations in the event of failures. It includes a BackOff strategy to manage the timing of retries and defines the action to take upon failure.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"backoff": {
+						SchemaProps: spec.SchemaProps{
+							Description: "BackOff specifies the parameters for the backoff strategy, controlling how delays between retries should increase.",
+							Ref:         ref("github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.Backoff"),
+						},
+					},
+					"onFailure": {
+						SchemaProps: spec.SchemaProps{
+							Description: "OnFailure specifies the action to take when a retry fails. The default action is to retry.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.Backoff"},
+	}
+}
+
 func schema_pkg_apis_numaflow_v1alpha1_SASL(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -4571,11 +4659,17 @@ func schema_pkg_apis_numaflow_v1alpha1_Sink(ref common.ReferenceCallback) common
 							Ref:         ref("github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.AbstractSink"),
 						},
 					},
+					"retryStrategy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RetryStrategy defines the criteria and method for retrying a failed write operation in the Sink. This type is used to customize how retries are handled, ensuring messages that fail to be delivered can be resent based on the configured strategy. It includes settings for backoff strategies and specific actions to take on failures.",
+							Ref:         ref("github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.RetryStrategy"),
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
-			"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.AbstractSink", "github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.Blackhole", "github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.KafkaSink", "github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.Log", "github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.UDSink"},
+			"github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.AbstractSink", "github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.Blackhole", "github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.KafkaSink", "github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.Log", "github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.RetryStrategy", "github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1.UDSink"},
 	}
 }
 

@@ -7488,6 +7488,50 @@ spec:
                           type: object
                         log:
                           type: object
+                        retryStrategy:
+                          properties:
+                            backoff:
+                              properties:
+                                cap:
+                                  type: string
+                                duration:
+                                  default: 1ms
+                                  type: string
+                                factor:
+                                  properties:
+                                    float64Val:
+                                      format: byte
+                                      type: string
+                                    strVal:
+                                      type: string
+                                    type:
+                                      format: int64
+                                      type: integer
+                                  required:
+                                  - type
+                                  type: object
+                                jitter:
+                                  properties:
+                                    float64Val:
+                                      format: byte
+                                      type: string
+                                    strVal:
+                                      type: string
+                                    type:
+                                      format: int64
+                                      type: integer
+                                  required:
+                                  - type
+                                  type: object
+                                steps:
+                                  default: 0
+                                  format: int32
+                                  type: integer
+                              type: object
+                            onFailure:
+                              default: retry
+                              type: string
+                          type: object
                         udsink:
                           properties:
                             container:

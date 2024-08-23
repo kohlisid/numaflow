@@ -885,6 +885,170 @@ needs to add “Authorization: Bearer <token>” in the header
 
 </table>
 
+<h3 id="numaflow.numaproj.io/v1alpha1.Backoff">
+
+Backoff
+</h3>
+
+<p>
+
+(<em>Appears on:</em>
+<a href="#numaflow.numaproj.io/v1alpha1.RetryStrategy">RetryStrategy</a>)
+</p>
+
+<p>
+
+<p>
+
+Backoff defines parameters for a backoff retry strategy, used to
+systematically increase the delay between retries.
+</p>
+
+</p>
+
+<table>
+
+<thead>
+
+<tr>
+
+<th>
+
+Field
+</th>
+
+<th>
+
+Description
+</th>
+
+</tr>
+
+</thead>
+
+<tbody>
+
+<tr>
+
+<td>
+
+<code>duration</code></br> <em>
+<a href="https://pkg.go.dev/k8s.io/apimachinery/pkg/apis/meta/v1#Duration">
+Kubernetes meta/v1.Duration </a> </em>
+</td>
+
+<td>
+
+<em>(Optional)</em>
+<p>
+
+Duration sets the initial delay before the first retry, after a failure
+occurs.
+</p>
+
+</td>
+
+</tr>
+
+<tr>
+
+<td>
+
+<code>factor</code></br> <em>
+<a href="#numaflow.numaproj.io/v1alpha1.Float64OrString">
+Float64OrString </a> </em>
+</td>
+
+<td>
+
+<em>(Optional)</em>
+<p>
+
+Factor determines how much the duration increases after each retry
+iteration. The delay before the subsequent retry will be the previous
+delay multiplied by this factor. Duration is multiplied by factor each
+iteration, if factor is not zero and the limits imposed by Steps and Cap
+have not been reached. Should not be negative. The jitter does not
+contribute to the updates to the duration parameter.
+</p>
+
+</td>
+
+</tr>
+
+<tr>
+
+<td>
+
+<code>jitter</code></br> <em>
+<a href="#numaflow.numaproj.io/v1alpha1.Float64OrString">
+Float64OrString </a> </em>
+</td>
+
+<td>
+
+<em>(Optional)</em>
+<p>
+
+The sleep at each iteration is the duration plus an additional amount
+chosen uniformly at random from the interval between zero and
+<code>jitter\*duration</code>.
+</p>
+
+</td>
+
+</tr>
+
+<tr>
+
+<td>
+
+<code>steps</code></br> <em> uint32 </em>
+</td>
+
+<td>
+
+<em>(Optional)</em>
+<p>
+
+The remaining number of iterations in which the duration parameter may
+change (but progress can be stopped earlier by hitting the cap). If not
+positive, the duration is not changed. Used for exponential backoff in
+combination with Factor and Cap.
+</p>
+
+</td>
+
+</tr>
+
+<tr>
+
+<td>
+
+<code>cap</code></br> <em>
+<a href="https://pkg.go.dev/k8s.io/apimachinery/pkg/apis/meta/v1#Duration">
+Kubernetes meta/v1.Duration </a> </em>
+</td>
+
+<td>
+
+<em>(Optional)</em>
+<p>
+
+A limit on revised values of the duration parameter. If a multiplication
+by the factor parameter would make the duration exceed the cap then the
+duration is set to the cap and the steps parameter is set to zero. Note:
+When the duration hits the cap, no further retries would occur
+</p>
+
+</td>
+
+</tr>
+
+</tbody>
+
+</table>
+
 <h3 id="numaflow.numaproj.io/v1alpha1.BasicAuth">
 
 BasicAuth
@@ -1909,6 +2073,87 @@ Length is the duration of the fixed window.
 
 Streaming should be set to true if the reduce udf is streaming.
 </p>
+
+</td>
+
+</tr>
+
+</tbody>
+
+</table>
+
+<h3 id="numaflow.numaproj.io/v1alpha1.Float64OrString">
+
+Float64OrString
+</h3>
+
+<p>
+
+(<em>Appears on:</em>
+<a href="#numaflow.numaproj.io/v1alpha1.Backoff">Backoff</a>)
+</p>
+
+<p>
+
+</p>
+
+<table>
+
+<thead>
+
+<tr>
+
+<th>
+
+Field
+</th>
+
+<th>
+
+Description
+</th>
+
+</tr>
+
+</thead>
+
+<tbody>
+
+<tr>
+
+<td>
+
+<code>type</code></br> <em>
+<a href="#numaflow.numaproj.io/v1alpha1.Type"> Type </a> </em>
+</td>
+
+<td>
+
+</td>
+
+</tr>
+
+<tr>
+
+<td>
+
+<code>float64Val</code></br> <em> \[\]byte </em>
+</td>
+
+<td>
+
+</td>
+
+</tr>
+
+<tr>
+
+<td>
+
+<code>strVal</code></br> <em> string </em>
+</td>
+
+<td>
 
 </td>
 
@@ -6707,6 +6952,23 @@ etc.).
 
 </p>
 
+<h3 id="numaflow.numaproj.io/v1alpha1.OnFailRetryStrategy">
+
+OnFailRetryStrategy (<code>string</code> alias)
+</p>
+
+</h3>
+
+<p>
+
+(<em>Appears on:</em>
+<a href="#numaflow.numaproj.io/v1alpha1.RetryStrategy">RetryStrategy</a>)
+</p>
+
+<p>
+
+</p>
+
 <h3 id="numaflow.numaproj.io/v1alpha1.PBQStorage">
 
 PBQStorage
@@ -8045,6 +8307,97 @@ config
 
 </table>
 
+<h3 id="numaflow.numaproj.io/v1alpha1.RetryStrategy">
+
+RetryStrategy
+</h3>
+
+<p>
+
+(<em>Appears on:</em>
+<a href="#numaflow.numaproj.io/v1alpha1.Sink">Sink</a>)
+</p>
+
+<p>
+
+<p>
+
+RetryStrategy struct encapsulates the settings for retrying operations
+in the event of failures. It includes a BackOff strategy to manage the
+timing of retries and defines the action to take upon failure.
+</p>
+
+</p>
+
+<table>
+
+<thead>
+
+<tr>
+
+<th>
+
+Field
+</th>
+
+<th>
+
+Description
+</th>
+
+</tr>
+
+</thead>
+
+<tbody>
+
+<tr>
+
+<td>
+
+<code>backoff</code></br> <em>
+<a href="#numaflow.numaproj.io/v1alpha1.Backoff"> Backoff </a> </em>
+</td>
+
+<td>
+
+<em>(Optional)</em>
+<p>
+
+BackOff specifies the parameters for the backoff strategy, controlling
+how delays between retries should increase.
+</p>
+
+</td>
+
+</tr>
+
+<tr>
+
+<td>
+
+<code>onFailure</code></br> <em>
+<a href="#numaflow.numaproj.io/v1alpha1.OnFailRetryStrategy">
+OnFailRetryStrategy </a> </em>
+</td>
+
+<td>
+
+<em>(Optional)</em>
+<p>
+
+OnFailure specifies the action to take when a retry fails. The default
+action is to retry.
+</p>
+
+</td>
+
+</tr>
+
+</tbody>
+
+</table>
+
 <h3 id="numaflow.numaproj.io/v1alpha1.SASL">
 
 SASL
@@ -9213,6 +9566,31 @@ it.
 
 </tr>
 
+<tr>
+
+<td>
+
+<code>retryStrategy</code></br> <em>
+<a href="#numaflow.numaproj.io/v1alpha1.RetryStrategy"> RetryStrategy
+</a> </em>
+</td>
+
+<td>
+
+<em>(Optional)</em>
+<p>
+
+RetryStrategy defines the criteria and method for retrying a failed
+write operation in the Sink. This type is used to customize how retries
+are handled, ensuring messages that fail to be delivered can be resent
+based on the configured strategy. It includes settings for backoff
+strategies and specific actions to take on failures.
+</p>
+
+</td>
+
+</tr>
+
 </tbody>
 
 </table>
@@ -9971,6 +10349,28 @@ Description
 </tbody>
 
 </table>
+
+<h3 id="numaflow.numaproj.io/v1alpha1.Type">
+
+Type (<code>int64</code> alias)
+</p>
+
+</h3>
+
+<p>
+
+(<em>Appears on:</em>
+<a href="#numaflow.numaproj.io/v1alpha1.Float64OrString">Float64OrString</a>)
+</p>
+
+<p>
+
+<p>
+
+Type represents the stored type of Float64OrString.
+</p>
+
+</p>
 
 <h3 id="numaflow.numaproj.io/v1alpha1.UDF">
 

@@ -17,8 +17,6 @@ limitations under the License.
 package forward
 
 import (
-	"time"
-
 	"go.uber.org/zap"
 
 	dfv1 "github.com/numaproj/numaflow/pkg/apis/numaflow/v1alpha1"
@@ -33,14 +31,15 @@ type options struct {
 	readBatchSize int64
 	// sinkConcurrency sets the concurrency for concurrent processing
 	sinkConcurrency int
-	// retryInterval is the time.Duration to sleep before retrying
-	retryInterval time.Duration
 	// fbSinkWriter is the writer for the fallback sink
 	fbSinkWriter sinker.SinkWriter
 	// logger is used to pass the logger variable
 	logger *zap.SugaredLogger
 	// cbPublisher is the callback publisher for the vertex.
 	cbPublisher *callback.Uploader
+	// retryStrategy struct encapsulates the settings for retrying operations in the event of sink write failures.
+	// It includes a BackOff strategy to manage the timing of retries and defines the action to take upon failure.
+	retryStrategy *dfv1.RetryStrategy
 }
 
 type Option func(*options) error
@@ -49,8 +48,8 @@ func DefaultOptions() *options {
 	return &options{
 		readBatchSize:   dfv1.DefaultReadBatchSize,
 		sinkConcurrency: dfv1.DefaultReadBatchSize,
-		retryInterval:   time.Millisecond,
 		logger:          logging.NewLogger(),
+		retryStrategy:   defaultRetryStrategy(),
 	}
 }
 
@@ -66,14 +65,6 @@ func WithReadBatchSize(f int64) Option {
 func WithSinkConcurrency(f int) Option {
 	return func(o *options) error {
 		o.sinkConcurrency = f
-		return nil
-	}
-}
-
-// WithRetryInterval sets the retry interval
-func WithRetryInterval(f time.Duration) Option {
-	return func(o *options) error {
-		o.retryInterval = time.Duration(f)
 		return nil
 	}
 }
@@ -98,6 +89,14 @@ func WithFbSinkWriter(sinkWriter sinker.SinkWriter) Option {
 func WithCallbackUploader(cp *callback.Uploader) Option {
 	return func(o *options) error {
 		o.cbPublisher = cp
+		return nil
+	}
+}
+
+// WithRetryStrategy sets the retry strategy for the sink
+func WithRetryStrategy(f *dfv1.RetryStrategy) Option {
+	return func(o *options) error {
+		o.retryStrategy = f
 		return nil
 	}
 }
