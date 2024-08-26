@@ -1,6 +1,10 @@
 package v1alpha1
 
-import "strconv"
+import (
+	"encoding/binary"
+	"math"
+	"strconv"
+)
 
 /**
 This inspired by intstr.IntOrStr and json.Number.
@@ -13,6 +17,12 @@ type Amount struct {
 
 func NewAmount(s string) Amount {
 	return Amount{Value: []byte(s)}
+}
+
+func NewAmountFromFloat64(s float64) Amount {
+	bytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(bytes, math.Float64bits(s))
+	return Amount{Value: bytes}
 }
 
 func (a *Amount) UnmarshalJSON(value []byte) error {
@@ -30,6 +40,11 @@ func (n Amount) OpenAPISchemaType() []string {
 
 func (n Amount) OpenAPISchemaFormat() string { return "" }
 
-func (n *Amount) Float64() (float64, error) {
-	return strconv.ParseFloat(string(n.Value), 64)
+// OpenAPIV3Types is used by the kube-openapi generator when constructing
+// the OpenAPI v3 spec of this type.
+func (n Amount) OpenAPIV3Types() []string { return []string{"number"} }
+
+func (n *Amount) Float64() float64 {
+	val, _ := strconv.ParseFloat(string(n.Value), 64)
+	return val
 }

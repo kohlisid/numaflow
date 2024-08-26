@@ -6199,7 +6199,6 @@ spec:
                             default: 1ms
                             type: string
                           factor:
-                            default: "1.0"
                             properties:
                               value:
                                 format: byte
@@ -6208,7 +6207,6 @@ spec:
                             - value
                             type: object
                           jitter:
-                            default: "0"
                             properties:
                               value:
                                 format: byte
@@ -15691,7 +15689,6 @@ spec:
                                   default: 1ms
                                   type: string
                                 factor:
-                                  default: "1.0"
                                   properties:
                                     value:
                                       format: byte
@@ -15700,7 +15697,6 @@ spec:
                                   - value
                                   type: object
                                 jitter:
-                                  default: "0"
                                   properties:
                                     value:
                                       format: byte
@@ -21149,7 +21145,6 @@ spec:
                             default: 1ms
                             type: string
                           factor:
-                            default: "1.0"
                             properties:
                               value:
                                 format: byte
@@ -21158,7 +21153,6 @@ spec:
                             - value
                             type: object
                           jitter:
-                            default: "0"
                             properties:
                               value:
                                 format: byte

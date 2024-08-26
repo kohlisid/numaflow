@@ -219,14 +219,12 @@ message Backoff {
   // and the limits imposed by Steps and Cap have not been reached.
   // Should not be negative.
   // The jitter does not contribute to the updates to the duration parameter.
-  // +kubebuilder:default="1.0"
   // +optional
   optional Amount factor = 2;
 
   // The sleep at each iteration is the duration plus an additional
   // amount chosen uniformly at random from the interval between
   // zero and `jitter*duration`.
-  // +kubebuilder:default="0"
   // +optional
   optional Amount jitter = 3;
 

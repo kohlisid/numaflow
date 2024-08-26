@@ -51,13 +51,11 @@ type Backoff struct {
 	// and the limits imposed by Steps and Cap have not been reached.
 	// Should not be negative.
 	// The jitter does not contribute to the updates to the duration parameter.
-	// +kubebuilder:default="1.0"
 	// +optional
 	Factor *Amount `json:"factor,omitempty" protobuf:"bytes,2,opt,name=factor"`
 	// The sleep at each iteration is the duration plus an additional
 	// amount chosen uniformly at random from the interval between
 	// zero and `jitter*duration`.
-	// +kubebuilder:default="0"
 	// +optional
 	Jitter *Amount `json:"jitter,omitempty" protobuf:"bytes,3,opt,name=jitter"`
 	// The remaining number of iterations in which the duration
