@@ -24,12 +24,12 @@ pub struct Backoff {
     pub cap: Option<kube::core::Duration>,
     #[serde(rename = "duration", skip_serializing_if = "Option::is_none")]
     pub duration: Option<kube::core::Duration>,
-    /// Amount represent a numeric amount.
+    /// Factor determines how much the duration increases after each retry iteration. The delay before the subsequent retry will be the previous delay multiplied by this factor. Duration is multiplied by factor each iteration, if factor is not zero and the limits imposed by Steps and Cap have not been reached. Should not be negative. The jitter does not contribute to the updates to the duration parameter.
     #[serde(rename = "factor", skip_serializing_if = "Option::is_none")]
-    pub factor: Option<f32>,
-    /// Amount represent a numeric amount.
+    pub factor: Option<String>,
+    /// The sleep at each iteration is the duration plus an additional amount chosen uniformly at random from the interval between zero and `jitter*duration`.
     #[serde(rename = "jitter", skip_serializing_if = "Option::is_none")]
-    pub jitter: Option<f32>,
+    pub jitter: Option<String>,
     /// The remaining number of iterations in which the duration parameter may change (but progress can be stopped earlier by hitting the cap). If not positive, the duration is not changed. Used for exponential backoff in combination with Factor and Cap.
     #[serde(rename = "steps", skip_serializing_if = "Option::is_none")]
     pub steps: Option<i64>,

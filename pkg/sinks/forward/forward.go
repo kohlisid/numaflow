@@ -488,8 +488,8 @@ func (df *DataForward) getBackOffConditions(infinite bool) wait.Backoff {
 	}
 	backoffCond := wait.Backoff{
 		Duration: df.opts.retryStrategy.BackOff.Duration.Duration,
-		Factor:   df.opts.retryStrategy.BackOff.Factor.Float64(),
-		Jitter:   df.opts.retryStrategy.BackOff.Jitter.Float64(),
+		//Factor:   df.opts.retryStrategy.BackOff.Factor.Float64(),
+		//Jitter:   df.opts.retryStrategy.BackOff.Jitter.Float64(),
 		// +1 for the first try which should always be done
 		Steps: int(*df.opts.retryStrategy.BackOff.Steps) + 1,
 	}

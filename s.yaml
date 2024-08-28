@@ -1,0 +1,40 @@
+apiVersion: numaflow.numaproj.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: simple-source
+spec:
+  vertices:
+    - name: in
+      source:
+        # A self data generating source
+        generator:
+          rpu: 2
+          duration: 1s
+    - name: output
+      scale:
+        min: 1
+      sink:
+        retryStrategy:
+          # Optional
+          backoff:
+            duration: 1s # Optional, defaults 1ms
+            factor: 2.0
+#              value: 2.0 # Optional, default 1
+            jitter: 0
+#              value: "0" # Optional, default 0
+            steps: 4 # Optional, number of retries (exclude the 1st time), defaults to 0
+          # Optional, defaults to infinite, in that case, steps will be ignored
+          onFailure: fallback
+        udsink:
+          container:
+            image: quay.io/test/numaflow-go/sink-log:test4
+            env:
+              - name: TYPE
+                value: "all-fail"
+        fallback:
+          udsink:
+            container:
+              image: quay.io/numaio/numaflow-java/simple-sink:stable
+  edges:
+    - from: in
+      to: output

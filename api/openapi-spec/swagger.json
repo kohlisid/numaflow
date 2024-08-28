@@ -17785,10 +17785,6 @@
         }
       }
     },
-    "io.numaproj.numaflow.v1alpha1.Amount": {
-      "description": "Amount represent a numeric amount.",
-      "type": "number"
-    },
     "io.numaproj.numaflow.v1alpha1.Authorization": {
       "type": "object",
       "properties": {
@@ -17812,11 +17808,11 @@
         },
         "factor": {
           "description": "Factor determines how much the duration increases after each retry iteration. The delay before the subsequent retry will be the previous delay multiplied by this factor. Duration is multiplied by factor each iteration, if factor is not zero and the limits imposed by Steps and Cap have not been reached. Should not be negative. The jitter does not contribute to the updates to the duration parameter.",
-          "$ref": "#/definitions/io.numaproj.numaflow.v1alpha1.Amount"
+          "type": "string"
         },
         "jitter": {
           "description": "The sleep at each iteration is the duration plus an additional amount chosen uniformly at random from the interval between zero and `jitter*duration`.",
-          "$ref": "#/definitions/io.numaproj.numaflow.v1alpha1.Amount"
+          "type": "string"
         },
         "steps": {
           "description": "The remaining number of iterations in which the duration parameter may change (but progress can be stopped earlier by hitting the cap). If not positive, the duration is not changed. Used for exponential backoff in combination with Factor and Cap.",

@@ -823,7 +823,9 @@ Container template for the side inputs watcher container.
 
 <h3 id="numaflow.numaproj.io/v1alpha1.Amount">
 
-Amount
+Amount (<code>string</code> alias)
+</p>
+
 </h3>
 
 <p>
@@ -836,49 +838,11 @@ Amount
 
 <p>
 
-Amount represent a numeric amount.
+Amount represents a numeric amount stored as a string to preserve
+precision.
 </p>
 
 </p>
-
-<table>
-
-<thead>
-
-<tr>
-
-<th>
-
-Field
-</th>
-
-<th>
-
-Description
-</th>
-
-</tr>
-
-</thead>
-
-<tbody>
-
-<tr>
-
-<td>
-
-<code>value</code></br> <em> \[\]byte </em>
-</td>
-
-<td>
-
-</td>
-
-</tr>
-
-</tbody>
-
-</table>
 
 <h3 id="numaflow.numaproj.io/v1alpha1.Authorization">
 

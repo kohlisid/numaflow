@@ -194,11 +194,6 @@ message AbstractVertex {
   optional ContainerTemplate sideInputsContainerTemplate = 15;
 }
 
-// Amount represent a numeric amount.
-message Amount {
-  optional bytes value = 1;
-}
-
 message Authorization {
   // A secret selector which contains bearer token
   // To use this, the client needs to add "Authorization: Bearer <token>" in the header
@@ -220,13 +215,13 @@ message Backoff {
   // Should not be negative.
   // The jitter does not contribute to the updates to the duration parameter.
   // +optional
-  optional Amount factor = 2;
+  optional string factor = 2;
 
   // The sleep at each iteration is the duration plus an additional
   // amount chosen uniformly at random from the interval between
   // zero and `jitter*duration`.
   // +optional
-  optional Amount jitter = 3;
+  optional string jitter = 3;
 
   // The remaining number of iterations in which the duration
   // parameter may change (but progress can be stopped earlier by

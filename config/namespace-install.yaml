@@ -6199,21 +6199,9 @@ spec:
                             default: 1ms
                             type: string
                           factor:
-                            properties:
-                              value:
-                                format: byte
-                                type: string
-                            required:
-                            - value
-                            type: object
+                            type: string
                           jitter:
-                            properties:
-                              value:
-                                format: byte
-                                type: string
-                            required:
-                            - value
-                            type: object
+                            type: string
                           steps:
                             default: 0
                             format: int32
@@ -15689,21 +15677,9 @@ spec:
                                   default: 1ms
                                   type: string
                                 factor:
-                                  properties:
-                                    value:
-                                      format: byte
-                                      type: string
-                                  required:
-                                  - value
-                                  type: object
+                                  type: string
                                 jitter:
-                                  properties:
-                                    value:
-                                      format: byte
-                                      type: string
-                                  required:
-                                  - value
-                                  type: object
+                                  type: string
                                 steps:
                                   default: 0
                                   format: int32
@@ -21145,21 +21121,9 @@ spec:
                             default: 1ms
                             type: string
                           factor:
-                            properties:
-                              value:
-                                format: byte
-                                type: string
-                            required:
-                            - value
-                            type: object
+                            type: string
                           jitter:
-                            properties:
-                              value:
-                                format: byte
-                                type: string
-                            required:
-                            - value
-                            type: object
+                            type: string
                           steps:
                             default: 0
                             format: int32

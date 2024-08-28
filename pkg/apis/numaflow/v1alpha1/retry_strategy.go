@@ -16,7 +16,9 @@ limitations under the License.
 
 package v1alpha1
 
-import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
 
 type OnFailRetryStrategy string
 
@@ -52,7 +54,7 @@ type Backoff struct {
 	// Should not be negative.
 	// The jitter does not contribute to the updates to the duration parameter.
 	// +optional
-	Factor *Amount `json:"factor,omitempty" protobuf:"bytes,2,opt,name=factor"`
+	Factor Amount `json:"factor,omitempty" protobuf:"bytes,2,opt,name=factor"`
 	// The sleep at each iteration is the duration plus an additional
 	// amount chosen uniformly at random from the interval between
 	// zero and `jitter*duration`.

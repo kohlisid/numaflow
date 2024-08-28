@@ -47,15 +47,15 @@ var DefaultRetryDuration = &metav1.Duration{Duration: DefaultRetrySleepInterval}
 // and theoretically infinite steps owing to the DefaultRetrySteps setting.
 // This mimics a fixed infinite retry strategy
 func defaultRetryStrategy() *dfv1.RetryStrategy {
-	factor := dfv1.NewAmountFromFloat64(DefaultRetryFactor)
-	jitter := dfv1.NewAmountFromFloat64(DefaultRetryJitter)
+	//factor := dfv1.NewAmountFromFloat64(DefaultRetryFactor)
+	//jitter := dfv1.NewAmountFromFloat64(DefaultRetryJitter)
 	steps := DefaultRetrySteps
 	return &dfv1.RetryStrategy{
 		BackOff: &dfv1.Backoff{
 			Duration: DefaultRetryDuration,
-			Factor:   &factor,
-			Jitter:   &jitter,
-			Steps:    &steps,
+			//Factor:   &factor,
+			//Jitter:   &jitter,
+			Steps: &steps,
 		},
 		OnFailure: dfv1.OnFailRetry,
 	}
