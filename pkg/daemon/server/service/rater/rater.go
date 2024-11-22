@@ -21,6 +21,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/prometheus/common/expfmt"
@@ -57,6 +58,7 @@ var fixedLookbackSeconds = map[string]int64{"1m": 60, "5m": 300, "15m": 900}
 
 // Rater is a struct that maintains information about the processing rate of each vertex.
 // It monitors the number of processed messages for each pod in a vertex and calculates the rate.
+// Along with this it also maintains the processing time of each pod in a vertex.
 type Rater struct {
 	pipeline   *v1alpha1.Pipeline
 	httpClient metricsHttpClient
@@ -64,8 +66,10 @@ type Rater struct {
 	podTracker *PodTracker
 	// timestampedPodCounts is a map between vertex name and a queue of timestamped counts for that vertex
 	timestampedPodCounts map[string]*sharedqueue.OverflowQueue[*TimestampedCounts]
+	// timestampedPodProcessingTime is a map between vertex name and a queue of timestamped processing times for that vertex
+	timestampedPodProcessingTime map[string]*sharedqueue.OverflowQueue[*TimestampedProcessingTime]
 	// userSpecifiedLookBackSeconds is a map between vertex name and the user-specified lookback seconds for that vertex
-	userSpecifiedLookBackSeconds map[string]int64
+	userSpecifiedLookBackSeconds *sync.Map
 	options                      *options
 }
 
@@ -85,6 +89,22 @@ func (p *PodReadCount) PartitionReadCounts() map[string]float64 {
 	return p.partitionReadCounts
 }
 
+// PodProcessingTime is a struct to maintain processing time for a batch by a pod
+type PodProcessingTime struct {
+	// pod name
+	name                string
+	processingTimeSum   float64
+	processingTimeCount float64
+}
+
+func (p *PodProcessingTime) Name() string {
+	return p.name
+}
+
+func (p *PodProcessingTime) processingTime() (float64, float64) {
+	return p.processingTimeSum, p.processingTimeCount
+}
+
 func NewRater(ctx context.Context, p *v1alpha1.Pipeline, opts ...Option) *Rater {
 	rater := Rater{
 		pipeline: p,
@@ -96,7 +116,8 @@ func NewRater(ctx context.Context, p *v1alpha1.Pipeline, opts ...Option) *Rater 
 		},
 		log:                          logging.FromContext(ctx).Named("Rater"),
 		timestampedPodCounts:         make(map[string]*sharedqueue.OverflowQueue[*TimestampedCounts]),
-		userSpecifiedLookBackSeconds: make(map[string]int64),
+		timestampedPodProcessingTime: make(map[string]*sharedqueue.OverflowQueue[*TimestampedProcessingTime]),
+		userSpecifiedLookBackSeconds: &sync.Map{},
 		options:                      defaultOptions(),
 	}
 
@@ -104,7 +125,10 @@ func NewRater(ctx context.Context, p *v1alpha1.Pipeline, opts ...Option) *Rater 
 	for _, v := range p.Spec.Vertices {
 		// maintain the total counts of the last 30 minutes(1800 seconds) since we support 1m, 5m, 15m lookback seconds.
 		rater.timestampedPodCounts[v.Name] = sharedqueue.New[*TimestampedCounts](int(1800 / CountWindow.Seconds()))
-		rater.userSpecifiedLookBackSeconds[v.Name] = int64(v.Scale.GetLookbackSeconds())
+		// TODO(adapt) : Is this time good enough 30 mins for storing or we need more?
+		rater.timestampedPodProcessingTime[v.Name] = sharedqueue.New[*TimestampedProcessingTime](int(1800 / CountWindow.Seconds()))
+		//rater.userSpecifiedLookBackSeconds[v.Name] = int64(v.Scale.GetLookbackSeconds())
+		rater.userSpecifiedLookBackSeconds.Store(v.Name, int64(v.Scale.GetLookbackSeconds()))
 	}
 
 	for _, opt := range opts {
@@ -140,17 +164,26 @@ func (r *Rater) monitorOnePod(ctx context.Context, key string, worker int) error
 		return err
 	}
 	var podReadCount *PodReadCount
+	var processingTime *PodProcessingTime
+
 	if r.podTracker.IsActive(key) {
 		podReadCount = r.getPodReadCounts(podInfo.vertexName, podInfo.podName)
 		if podReadCount == nil {
 			log.Debugf("Failed retrieving total podReadCount for pod %s", podInfo.podName)
 		}
+		processingTime = r.getPodProcessingTime(podInfo.vertexName, podInfo.podName)
+		if processingTime == nil {
+			log.Debugf("Failed retrieving total processingTime for pod %s", podInfo.podName)
+		}
 	} else {
 		log.Debugf("Pod %s does not exist, updating it with nil...", podInfo.podName)
 		podReadCount = nil
+		processingTime = nil
 	}
 	now := time.Now().Add(CountWindow).Truncate(CountWindow).Unix()
 	UpdateCount(r.timestampedPodCounts[podInfo.vertexName], now, podReadCount)
+	UpdateProcessingTime(r.timestampedPodProcessingTime[podInfo.vertexName], now, processingTime)
+	r.log.Infof("MYDEBUG:  processing rate vertex %s is: %v", podInfo.vertexName, r.timestampedPodProcessingTime[podInfo.vertexName])
 	return nil
 }
 
@@ -265,6 +298,47 @@ func (r *Rater) getPodReadCounts(vertexName, podName string) *PodReadCount {
 	}
 }
 
+// getPodProcessingTime
+func (r *Rater) getPodProcessingTime(vertexName, podName string) *PodProcessingTime {
+	//processingTimeSumMetricName := "forwarder_forward_chunk_processing_time_sum"
+	//processingTimeCountMetricName := "forwarder_forward_chunk_processing_time_count"
+	processingTimeCountMetric := "forwarder_forward_chunk_processing_time"
+	// scrape the read total metric from pod metric port
+	url := fmt.Sprintf("https://%s.%s.%s.svc:%v/metrics", podName, r.pipeline.Name+"-"+vertexName+"-headless", r.pipeline.Namespace, v1alpha1.VertexMetricsPort)
+	resp, err := r.httpClient.Get(url)
+	if err != nil {
+		r.log.Warnf("[vertex name %s, pod name %s]: failed reading the metrics endpoint, the pod might have been scaled down: %v", vertexName, podName, err.Error())
+		return nil
+	}
+	defer resp.Body.Close()
+
+	textParser := expfmt.TextParser{}
+	result, err := textParser.TextToMetricFamilies(resp.Body)
+	if err != nil {
+		r.log.Errorf("[Pod name %s]:  failed parsing to prometheus metric families, %v", podName, err.Error())
+		return nil
+	}
+
+	var podSum, podCount float64
+	if value, ok := result[processingTimeCountMetric]; ok && value != nil && len(value.GetMetric()) > 0 {
+		metricsList := value.GetMetric()
+		// Each pod should be emitting only one metric with this name, so we should be able to take the first value
+		// from the results safely.
+		// https://github.com/prometheus/client_rust/issues/194
+		ele := metricsList[0]
+		podCount = float64(ele.Histogram.GetSampleCount())
+		podSum = ele.Histogram.GetSampleSum()
+	} else {
+		r.log.Infof("[Pod name %s]: Metric %q is unavailable, the pod might haven't started processing data", podName, processingTimeCountMetric)
+		return nil
+	}
+	return &PodProcessingTime{
+		name:                podName,
+		processingTimeSum:   podSum,
+		processingTimeCount: podCount,
+	}
+}
+
 // GetRates returns the processing rates of the vertex partition in the format of lookback second to rate mappings
 func (r *Rater) GetRates(vertexName, partitionName string) map[string]*wrapperspb.DoubleValue {
 	r.log.Debugf("Getting rates for vertex %s, partition %s", vertexName, partitionName)
@@ -280,9 +354,46 @@ func (r *Rater) GetRates(vertexName, partitionName string) map[string]*wrappersp
 }
 
 func (r *Rater) buildLookbackSecondsMap(vertexName string) map[string]int64 {
-	lookbackSecondsMap := map[string]int64{"default": r.userSpecifiedLookBackSeconds[vertexName]}
+	lbValue, _ := r.userSpecifiedLookBackSeconds.Load(vertexName)
+	lookbackSecondsMap := map[string]int64{"default": lbValue.(int64)}
 	for k, v := range fixedLookbackSeconds {
 		lookbackSecondsMap[k] = v
 	}
 	return lookbackSecondsMap
+}
+
+// UpdateDynamicLookBack updates the default lookback period of a vertex based on the processing rate
+func (r *Rater) UpdateDynamicLookBack(vertexList []string) map[string]*wrapperspb.DoubleValue {
+	var result = make(map[string]*wrapperspb.DoubleValue)
+	// calculate rates for each lookback seconds
+
+	for _, v := range r.pipeline.Spec.Vertices {
+		vertexName := v.Name
+		pt := r.CalculateVertexProcessingTime(v, r.timestampedPodProcessingTime[vertexName])
+		// if the current calculated processing time is greater than the lookback Seconds, update it
+		currentVal, _ := r.userSpecifiedLookBackSeconds.Load(vertexName)
+		if pt > currentVal.(float64) {
+			// TODO(adapt): We should find a suitable value for this, using 2 * pt right now
+			r.userSpecifiedLookBackSeconds.Store(vertexName, 2*pt)
+			r.log.Debugf("MYDEBUG: Updated for vertex %s, old %f new %f: %v", vertexName, currentVal, pt, result)
+		}
+	}
+
+	return result
+}
+
+func (r *Rater) CalculateVertexProcessingTime(vertex v1alpha1.AbstractVertex, q *sharedqueue.OverflowQueue[*TimestampedProcessingTime]) float64 {
+	counts := q.Items()
+	// If we do not have enough data points, lets send back the default from the vertex
+	if len(counts) <= 1 {
+		return float64(vertex.Scale.GetLookbackSeconds())
+	}
+
+	startIndex := findStartIndex(lookbackSeconds, counts)
+	// we consider the last but one element as the end index because the last element might be incomplete
+	// we can be sure that the last but one element in the queue is complete.
+	endIndex := len(counts) - 2
+	if startIndex == indexNotFound {
+		return rateNotAvailable
+	}
 }

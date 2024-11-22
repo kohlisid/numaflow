@@ -48,6 +48,24 @@ func UpdateCount(q *sharedqueue.OverflowQueue[*TimestampedCounts], time int64, p
 	q.Append(tc)
 }
 
+// UpdateProcessingTime updates the processing time of a batch of messages for a pod at a given time
+func UpdateProcessingTime(q *sharedqueue.OverflowQueue[*TimestampedProcessingTime], time int64, podProcessingTime *PodProcessingTime) {
+	items := q.Items()
+
+	// find the element matching the input timestamp and update it
+	for _, i := range items {
+		if i.timestamp == time {
+			i.Update(podProcessingTime)
+			return
+		}
+	}
+
+	// if we cannot find a matching element, it means we need to add a new timestamped count to the queue
+	tc := NewTimestampedProcessingTime(time)
+	tc.Update(podProcessingTime)
+	q.Append(tc)
+}
+
 // CalculateRate calculates the rate of the vertex partition in the last lookback seconds
 func CalculateRate(q *sharedqueue.OverflowQueue[*TimestampedCounts], lookbackSeconds int64, partitionName string) float64 {
 	counts := q.Items()
