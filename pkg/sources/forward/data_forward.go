@@ -197,12 +197,12 @@ func (df *DataForward) forwardAChunk(ctx context.Context) error {
 	replicaIndex := strconv.Itoa(int(df.vertexReplica))
 	vertexType := string(dfv1.VertexTypeSource)
 	totalBytes := 0
-	metricLabels := map[string]string{
-		metrics.LabelVertex:             df.vertexName,
-		metrics.LabelPipeline:           df.pipelineName,
-		metrics.LabelVertexType:         vertexType,
-		metrics.LabelVertexReplicaIndex: replicaIndex,
-	}
+	//metricLabels := map[string]string{
+	//	metrics.LabelVertex:             df.vertexName,
+	//	metrics.LabelPipeline:           df.pipelineName,
+	//	metrics.LabelVertexType:         vertexType,
+	//	metrics.LabelVertexReplicaIndex: replicaIndex,
+	//}
 	metricLabelsWithPartition := map[string]string{
 		metrics.LabelVertex:             df.vertexName,
 		metrics.LabelPipeline:           df.pipelineName,
@@ -469,7 +469,7 @@ func (df *DataForward) forwardAChunk(ctx context.Context) error {
 	}
 
 	// ProcessingTimes of the entire forwardAChunk
-	metrics.ForwardAChunkProcessingTime.With(metricLabels).Observe(float64(time.Since(start).Microseconds()))
+	metrics.ForwardAChunkProcessingTime.With(metricLabelsWithPartition).Observe(float64(time.Since(start).Microseconds()))
 	return nil
 }
 

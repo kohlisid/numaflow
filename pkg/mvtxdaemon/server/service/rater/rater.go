@@ -149,6 +149,7 @@ func (r *Rater) monitorOnePod(ctx context.Context, key string, worker int) error
 	}
 	now := time.Now().Add(CountWindow).Truncate(CountWindow).Unix()
 	UpdateCount(r.timestampedPodCounts, now, podReadCount)
+	r.log.Info("MYDEBUG Timeline", r.timestampedPodCounts)
 	return nil
 }
 

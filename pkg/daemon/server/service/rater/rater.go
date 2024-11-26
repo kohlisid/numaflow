@@ -389,11 +389,12 @@ func (r *Rater) CalculateVertexProcessingTime(vertex v1alpha1.AbstractVertex, q 
 		return float64(vertex.Scale.GetLookbackSeconds())
 	}
 
-	startIndex := findStartIndex(lookbackSeconds, counts)
-	// we consider the last but one element as the end index because the last element might be incomplete
-	// we can be sure that the last but one element in the queue is complete.
-	endIndex := len(counts) - 2
-	if startIndex == indexNotFound {
-		return rateNotAvailable
-	}
+	//startIndex := findStartIndex(lookbackSeconds, counts)
+	//// we consider the last but one element as the end index because the last element might be incomplete
+	//// we can be sure that the last but one element in the queue is complete.
+	//endIndex := len(counts) - 2
+	//if startIndex == indexNotFound {
+	//	return rateNotAvailable
+	//}
+	return float64(vertex.Scale.GetLookbackSeconds())
 }

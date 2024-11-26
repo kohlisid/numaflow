@@ -179,12 +179,12 @@ func (isdf *InterStepDataForward) forwardAChunk(ctx context.Context) error {
 	totalBytes := 0
 	dataBytes := 0
 	// Initialize metric labels
-	metricLabels := map[string]string{
-		metrics.LabelVertex:             isdf.vertexName,
-		metrics.LabelPipeline:           isdf.pipelineName,
-		metrics.LabelVertexType:         string(dfv1.VertexTypeMapUDF),
-		metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica)),
-	}
+	//metricLabels := map[string]string{
+	//	metrics.LabelVertex:             isdf.vertexName,
+	//	metrics.LabelPipeline:           isdf.pipelineName,
+	//	metrics.LabelVertexType:         string(dfv1.VertexTypeMapUDF),
+	//	metrics.LabelVertexReplicaIndex: strconv.Itoa(int(isdf.vertexReplica)),
+	//}
 	metricLabelsWithPartition := map[string]string{
 		metrics.LabelVertex:             isdf.vertexName,
 		metrics.LabelPipeline:           isdf.pipelineName,
@@ -392,7 +392,7 @@ func (isdf *InterStepDataForward) forwardAChunk(ctx context.Context) error {
 		}
 	}
 	// ProcessingTimes of the entire forwardAChunk
-	metrics.ForwardAChunkProcessingTime.With(metricLabels).Observe(float64(time.Since(start).Microseconds()))
+	metrics.ForwardAChunkProcessingTime.With(metricLabelsWithPartition).Observe(float64(time.Since(start).Microseconds()))
 	return nil
 }
 
