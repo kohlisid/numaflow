@@ -563,10 +563,21 @@ func (v Vertex) GetReplicas() int {
 		// Replica of a reduce vertex is determined by the partitions.
 		return v.GetPartitionCount()
 	}
-	if v.Spec.Replicas == nil {
-		return 1
+	desiredReplicas := 1
+	if v.Spec.Replicas != nil {
+		desiredReplicas = int(*v.Spec.Replicas)
 	}
-	return int(*v.Spec.Replicas)
+	// Don't allow replicas to be out of the range of min and max when auto scaling is enabled
+	if s := v.Spec.Scale; !s.Disabled {
+		maxReplicas := int(s.GetMaxReplicas())
+		minReplicas := int(s.GetMinReplicas())
+		if desiredReplicas < minReplicas {
+			desiredReplicas = minReplicas
+		} else if desiredReplicas > maxReplicas {
+			desiredReplicas = maxReplicas
+		}
+	}
+	return desiredReplicas
 }
 
 type VertexSpec struct {
